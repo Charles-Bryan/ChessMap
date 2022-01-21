@@ -15,17 +15,6 @@ import pandas as pd
 def retrieve_data(site="Lichess", user="E4_is_Better"):
     """
     Starting off with no filters
-    timing tests using my data:
-    Line by line: 113984 function calls (113903 primitive calls) in 83.475 seconds
-        'r = requests.get(url, stream=True)'
-    All at once: 56303 function calls (52932 primitive calls) in 83.478 seconds
-        'r = requests.get(url)'
-    chunk_size = 2048: 90930 function calls (90849 primitive calls) in 83.456 seconds
-        'r = requests.get(url, stream=True)
-        for line in r.iter_lines(chunk_size=2048)'
-    :param site:
-    :param user:
-    :return:
     """
     default_game = {
         'Event': None,
@@ -95,15 +84,27 @@ def retrieve_data(site="Lichess", user="E4_is_Better"):
             # b'1. e4
 
     # Not sure the best way to transpose in datatable, so doing it in numpy first....
-    df = pd.DataFrame(all_games)
+    return pd.DataFrame(all_games)
+
+
+def process_df_cols(input_df):
+    df = input_df.copy()
+
     print(0)
 
-    # Columns to make
-        # Player Color
-        # Result (win, loss, draw)
-        # Opponent
-        # Opponent Color
-        # Variant (Only in future)
+    # TimeControl
+    #   Splitting into StartClock(in seconds) and increment(in seconds)
+    df['TimeControl'] = df['TimeControl'].str.replace('-', '99999+0')
+    df[['StartClock', 'Increment']] = df['TimeControl'].str.split('+', n=1, expand=True).apply(pd.to_numeric)
+
+    #testing
+    print(0)
+    test = df["StartClock"] + 40*df["Increment"]
+    print(0)
+def main():
+    df = retrieve_data()
+    df = process_df_cols(df)
+
 
 if __name__ == '__main__':
-    cProfile.run('retrieve_data()')
+    cProfile.run('main()')
