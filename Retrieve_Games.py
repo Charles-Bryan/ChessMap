@@ -50,18 +50,17 @@ def retrieve_data(site="Lichess", user="E4_is_Better"):
     url = 'https://lichess.org/api/games/user/' + user + '?tags=true&clocks=false&evals=false&opening=false'
     r = requests.get(url, stream=True)
 
-    # retrieve_game(r)
     all_games = []
     temp_game = default_game.copy()
     ignore_game = False  # Used to detect if a Variant (and potentially other cases are caught)
     for raw_line in r.iter_lines():
-        # retrieve_game(r)
+
         if raw_line:  # skips over blank lines
             line = raw_line.decode('UTF-8')
             if line[0] == '[':
                 space_loc = line.find(' ')
                 # temp_game[line[1:space_loc]] = line[space_loc+2:-2]  # Use this after testing
-                if line[1:space_loc] in ('FEN', 'SetUp'):  # Easier/Safer to just compare vs a white list then to make this black list
+                if line[1:space_loc] not in default_game.keys():  # Easier/Safer to just compare vs a white list then to make this black list
                     ignore_game = True
                 elif temp_game[line[1:space_loc]] == None:
                      temp_game[line[1:space_loc]] = line[space_loc + 2:-2]
@@ -94,9 +93,6 @@ def retrieve_data(site="Lichess", user="E4_is_Better"):
             # b'[ECO "B21"]'
             # b'[Termination "Time forfeit"]'
             # b'1. e4
-
-
-
 
     # Not sure the best way to transpose in datatable, so doing it in numpy first....
     df = pd.DataFrame(all_games)
