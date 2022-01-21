@@ -86,11 +86,24 @@ def retrieve_data(site="Lichess", user="E4_is_Better"):
     # Not sure the best way to transpose in datatable, so doing it in numpy first....
     return pd.DataFrame(all_games)
 
-
 def process_df_cols(input_df):
     df = input_df.copy()
-
-    print(0)
+    # Event - likely drop and use the Rating Dif to determine if rated or casual
+    # Site - Drop for now
+    # Date - Not needed with UTC date
+    # White - Needed to determine player color, opponent name, and opponent color
+    # Black - Needed to determine player color, opponent name, and opponent color
+    # Result - Used to determine Win/Loss/Draw
+    # UTCDate - Likely keep as is
+    # UTCTime - Likely Drop
+    # WhiteElo - Keep for performance stuff later
+    # BlackElo - Keep for performance stuff later
+    # WhiteRatingDiff - Keep for performance stuff and determining if Rated
+    # BlackRatingDiff - Keep for performance stuff and determining if Rated
+    # Variant - Probably will keep only rows where = standard.
+    # TimeControl - Used to determine game speed [blitz/rapid/etc]
+    # ECO - Likely dropping
+    # Termination - Will need to see what unique options there are and if that will affect dropping rows. Use a player like german11 to see all possibilities.
 
     # TimeControl
     #   Splitting into StartClock(in seconds) and increment(in seconds)
@@ -101,6 +114,7 @@ def process_df_cols(input_df):
     print(0)
     test = df["StartClock"] + 40*df["Increment"]
     print(0)
+
 def main():
     df = retrieve_data()
     df = process_df_cols(df)
