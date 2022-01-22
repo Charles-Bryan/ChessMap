@@ -10,6 +10,7 @@ import requests  # for downloading games
 import cProfile
 import pandas as pd
 import datetime as dt
+import time
 
 
 def create_url(inputs):
@@ -84,108 +85,69 @@ def retrieve_data(url):
     Just finished making the url
     """
     default_game = {
-        'Event': None,
-        'Site': None,
-        'Date': None,
         'White': None,
         'Black': None,
         'Result': None,
-        'UTCDate': None,
-        'UTCTime': None,
         'WhiteElo': None,
         'BlackElo': None,
         'WhiteRatingDiff': None,
         'BlackRatingDiff': None,
-        'Variant': None,
-        'TimeControl': None,
-        'ECO': None,
-        'Termination': None,
         'Raw_Moves': None
     }
-
+    white_list = ['White', 'Black', 'Result', 'WhiteElo', 'BlackElo', 'WhiteRatingDiff', 'BlackRatingDiff']
+    black_list = ['Event', 'Site', 'Date', 'UTCDate', 'UTCTime', 'Variant',
+                  'TimeControl', 'ECO', 'Termination', 'FEN', 'SetUp']
     r = requests.get(url, stream=True)
+    if r.status_code == 429:
+        print(f"We got a 429!")
+        while r.status_code == '429':
+            time.sleep(60)
+            r = requests.get(url, stream=True)
+    elif r.status_code != 200:
+        print(f"Unexpected response status code {r.status_code}.")
+
 
     all_games = []
     temp_game = default_game.copy()
     ignore_game = False  # Used to detect if a Variant (and potentially other cases are caught)
     for raw_line in r.iter_lines():
-
         if raw_line:  # skips over blank lines
             line = raw_line.decode('UTF-8')
             if line[0] == '[':
                 space_loc = line.find(' ')
-                # temp_game[line[1:space_loc]] = line[space_loc+2:-2]  # Use this after testing
-                if line[
-                   1:space_loc] not in default_game.keys():  # Easier/Safer to just compare vs a white list then to make this black list
-                    ignore_game = True
-                elif temp_game[line[1:space_loc]] == None:
-                    temp_game[line[1:space_loc]] = line[space_loc + 2:-2]
+                if line[1:space_loc] in black_list:
+                    continue
+                elif line[1:space_loc] in white_list:  # makes sure the tag is in our white list
+                    if temp_game[line[1:space_loc]] is None:
+                        temp_game[line[1:space_loc]] = line[space_loc + 2:-2]
+                    else:
+                        print("debug: shouldnt be overwriting the same value")
+                        ignore_game = True
                 else:
-                    print(
-                        f"Error! Updating {line[1:space_loc]} from {temp_game[line[1:space_loc]]} to {line[space_loc + 2:-2]}. It should be None if we are going to update it.")
+                    print(f"debug: Unexpected tag {line[1:space_loc]}")
             elif line[0].isdigit():
-                temp_game['Raw_Moves'] = line
+                if line[0] != '1':
+                    ignore_game = True
+                else:
+                    temp_game['Raw_Moves'] = line
+
                 if ignore_game:  # Need to catch variants here like Crazyhouse
+                    temp_game = default_game.copy()
                     ignore_game = False
                 else:
                     all_games.append(temp_game)
-                temp_game = default_game.copy()
+                    temp_game = default_game.copy()
             else:
                 print(f"Unexpected line: {line}")
 
-            # b'[Event "Rated Bullet game"]'
-            # b'[Site "https://lichess.org/CvirGZ84"]'
-            # b'[Date "2022.01.16"]'
-            # b'[White "E4_is_Better"]'
-            # b'[Black "iamali"]'
-            # b'[Result "0-1"]'
-            # b'[UTCDate "2022.01.16"]'
-            # b'[UTCTime "15:08:15"]'
-            # b'[WhiteElo "1580"]'
-            # b'[BlackElo "1594"]'
-            # b'[WhiteRatingDiff "-9"]'
-            # b'[BlackRatingDiff "+5"]'
-            # b'[Variant "Standard"]'
-            # b'[TimeControl "120+1"]'
-            # b'[ECO "B21"]'
-            # b'[Termination "Time forfeit"]'
-            # b'1. e4
-
-    # Not sure the best way to transpose in datatable, so doing it in numpy first....
     return pd.DataFrame(all_games)
 
 
 def process_df_cols(input_df):
     df = input_df.copy()
-    # Event - Likely Drop and use the Rating Dif to determine if rated or casual
-    # Site - Drop for now
-    # Date - Not needed
-    # White - Needed to determine player color, opponent name, and opponent color
-    # Black - Needed to determine player color, opponent name, and opponent color
-    # Result - Used to determine Win/Loss/Draw
-    # UTCDate - Likely Drop
-    # UTCTime - Likely Drop
-    # WhiteElo - Keep for performance stuff later
-    # BlackElo - Keep for performance stuff later
-    # WhiteRatingDiff - Likely Drop. If Rated or Casual is wanted, they need to select it
-    # BlackRatingDiff - Likely Drop. If Rated or Casual is wanted, they need to select it
-    # Variant - Likely Drop. Games will be selected through API
-    # TimeControl - Likely Drop
-    # ECO - Likely Drop
-    # Termination - Will need to see what unique options there are and if that will affect dropping rows.
-    #   Use a player like german11 to see all possibilities.
 
-    # TimeControl
-    #   Splitting into StartClock(in seconds) and increment(in seconds)
-    df['TimeControl'] = df['TimeControl'].str.replace('-', '99999+0')
-    df[['StartClock', 'Increment']] = df['TimeControl'].str.split('+', n=1, expand=True).apply(pd.to_numeric)
-
-    # testing
-
-    print(0)
-    test = df["StartClock"] + 40 * df["Increment"]
-    print(0)
-
+    # Only starting with the following columns:
+    #   White, Black, Result, Raw_Moves
     return df
 
 
@@ -207,6 +169,9 @@ def main():
     }
     url = create_url(inputs)
     raw_game_df = retrieve_data(url)
+
+    # Temp until I get around to working with the Performance Data
+    raw_game_df.drop(['WhiteElo', 'BlackElo', 'WhiteRatingDiff', 'BlackRatingDiff'], axis=1, inplace=True)
 
     cleaned_game_df = process_df_cols(raw_game_df)
 
