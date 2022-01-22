@@ -8,9 +8,25 @@ Build Process
 """
 import requests # for downloading games
 import cProfile
-import numpy as np  # Internet says numpy is better for large data than lists
-import datatable as dt  # Trying datatable instead of pandas. Supposed oto be faster.
 import pandas as pd
+
+def create_url(inputs):
+    # default
+    prefix = f"https://lichess.org/api/games/user/{inputs['Player']}?"
+    mid = f"tags=false&clocks=false&evals=false&opening=false"
+
+    # pre-mid sections. These will append a '&' as a suffix
+    # 1. color
+    match inputs['Player_Color']:
+        case 'Both':
+            print('Both')
+        case 'White':
+            print('White')
+        case 'Black':
+            print('Black')
+    # post-mid sections. These sections will prefix the '&' and not append
+    # start/end dates
+
 
 def retrieve_data(site="Lichess", user="E4_is_Better"):
     """
@@ -88,21 +104,21 @@ def retrieve_data(site="Lichess", user="E4_is_Better"):
 
 def process_df_cols(input_df):
     df = input_df.copy()
-    # Event - likely drop and use the Rating Dif to determine if rated or casual
+    # Event - Likely Drop and use the Rating Dif to determine if rated or casual
     # Site - Drop for now
-    # Date - Not needed with UTC date
+    # Date - Not needed
     # White - Needed to determine player color, opponent name, and opponent color
     # Black - Needed to determine player color, opponent name, and opponent color
     # Result - Used to determine Win/Loss/Draw
-    # UTCDate - Likely keep as is
+    # UTCDate - Likely Drop
     # UTCTime - Likely Drop
     # WhiteElo - Keep for performance stuff later
     # BlackElo - Keep for performance stuff later
-    # WhiteRatingDiff - Keep for performance stuff and determining if Rated
-    # BlackRatingDiff - Keep for performance stuff and determining if Rated
-    # Variant - Probably will keep only rows where = standard.
-    # TimeControl - Used to determine game speed [blitz/rapid/etc]
-    # ECO - Likely dropping
+    # WhiteRatingDiff - Likely Drop. If Rated or Casual is wanted, they need to select it
+    # BlackRatingDiff - Likely Drop. If Rated or Casual is wanted, they need to select it
+    # Variant - Likely Drop. Games will be selected through API
+    # TimeControl - Likely Drop
+    # ECO - Likely Drop
     # Termination - Will need to see what unique options there are and if that will affect dropping rows. Use a player like german11 to see all possibilities.
 
     # TimeControl
@@ -116,6 +132,21 @@ def process_df_cols(input_df):
     print(0)
 
 def main():
+    inputs = {
+        "Player": 'E4_is_Better',
+        "Player_Color": 'Both',     # White, Black, Both
+        "Opponent": 'All',          # Username, All
+        "UltraBullet": 'Yes',       # Yes, No
+        "Bullet": 'Yes',            # Yes, No
+        "Blitz": 'Yes',             # Yes, No
+        "Rapid": 'Yes',             # Yes, No
+        "Classical": 'Yes',         # Yes, No
+        "Correspondence": 'Yes',    # Yes, No
+        "Mode": 'Both',             # Rated, Casual, Both
+        "Start_Date": '1990-01-30', # Dates in a format undecided
+        "End_Date": 'Today'         # Today or date in format above
+    }
+    url = create_url(inputs)
     df = retrieve_data()
     df = process_df_cols(df)
 
