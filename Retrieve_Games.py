@@ -9,6 +9,7 @@ Build Process
 import requests  # for downloading games
 import cProfile
 import pandas as pd
+import numpy as np
 import datetime as dt
 import time
 
@@ -51,7 +52,6 @@ def create_url(inputs):
     if inputs['Start_Date'] == 'None':
         start_date_str = ''
     else:
-        # start_dt = fun(inputs['Start_Date'])
         t_ms = int((inputs['Start_Date'] - dt.datetime(1970, 1, 1)).total_seconds()) * 1000
         start_date_str = f'&since={t_ms}'
 
@@ -84,19 +84,12 @@ def retrieve_data(url):
     """
     Just finished making the url
     """
-    default_game = {
-        'White': None,
-        'Black': None,
-        'Result': None,
-        'WhiteElo': None,
-        'BlackElo': None,
-        'WhiteRatingDiff': None,
-        'BlackRatingDiff': None,
-        'Raw_Moves': None
-    }
-    white_list = ['White', 'Black', 'Result', 'WhiteElo', 'BlackElo', 'WhiteRatingDiff', 'BlackRatingDiff']
-    black_list = ['Event', 'Site', 'Date', 'UTCDate', 'UTCTime', 'Variant',
-                  'TimeControl', 'ECO', 'Termination', 'FEN', 'SetUp']
+    default_game = {'Raw_Moves': None}
+    white_list = ['White', 'Black', 'Date', 'Result', 'WhiteElo', 'BlackElo', 'WhiteRatingDiff', 'BlackRatingDiff']
+    black_list = ['Event', 'Site', 'UTCDate', 'UTCTime', 'Variant', 'TimeControl', 'ECO', 'Termination', 'FEN', 'SetUp']
+    for e in white_list:
+        default_game[e] = None
+
     r = requests.get(url, stream=True)
     if r.status_code == 429:
         print(f"We got a 429!")
@@ -105,7 +98,6 @@ def retrieve_data(url):
             r = requests.get(url, stream=True)
     elif r.status_code != 200:
         print(f"Unexpected response status code {r.status_code}.")
-
 
     all_games = []
     temp_game = default_game.copy()
@@ -143,11 +135,41 @@ def retrieve_data(url):
     return pd.DataFrame(all_games)
 
 
-def process_df_cols(input_df):
+def process_df_cols(player_name, input_df):
     df = input_df.copy()
 
+    # drop the rating diff columns. Keeping just for later performance analysis project
+    df.drop(columns=['WhiteRatingDiff', 'BlackRatingDiff'], inplace=True)
+
     # Only starting with the following columns:
-    #   White, Black, Result, Raw_Moves
+    #   White, Black, Result, Raw_Moves, Date, WhiteElo, BlackElo
+
+    # Save player color for later?
+    # df['Player_Color'] = np.where(df['White'] == player_name, 'White', 'Black')
+
+    # opponent_elo
+    df['OpponentElo'] = np.where(df['White'] == player_name, df['BlackElo'], df['WhiteElo'])
+
+    # parsing result
+    result_conditions = [
+        (df['White'] == player_name) & (df['Result'] == '1-0'),  # Win as white
+        (df['Black'] == player_name) & (df['Result'] == '0-1'),  # Win as black
+        (df['White'] == player_name) & (df['Result'] == '0-1'),  # Loss as white
+        (df['Black'] == player_name) & (df['Result'] == '1-0'),  # Loss as black
+        (df['Result'] == '1/2-1/2')  # draw
+    ]
+    result_values = [1, 1, 0, 0, 0.5]  # win, win, loss, loss, draw
+    df['Outcome'] = np.select(result_conditions, result_values)
+
+    df.drop(columns=['White', 'Black', 'Result', 'WhiteElo', 'BlackElo'], inplace=True)
+
+    # force column types to save a little memory
+    df = df.astype({
+        'Date': 'datetime64',
+        'OpponentElo': 'int16',
+        'Outcome': 'float16'
+    })
+
     return df
 
 
@@ -170,10 +192,7 @@ def main():
     url = create_url(inputs)
     raw_game_df = retrieve_data(url)
 
-    # Temp until I get around to working with the Performance Data
-    raw_game_df.drop(['WhiteElo', 'BlackElo', 'WhiteRatingDiff', 'BlackRatingDiff'], axis=1, inplace=True)
-
-    cleaned_game_df = process_df_cols(raw_game_df)
+    cleaned_game_df = process_df_cols(player_name=inputs["Player"], input_df=raw_game_df)
 
 
 if __name__ == '__main__':
