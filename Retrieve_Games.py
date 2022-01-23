@@ -13,6 +13,9 @@ import numpy as np
 import datetime as dt
 import time
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+import plotly.express as px
 
 def create_url(inputs):
     # default parts
@@ -118,8 +121,8 @@ def retrieve_data(url):
                 else:
                     print(f"debug: Unexpected tag {line[1:space_loc]}")
             elif line[0].isdigit():
-                if line[0] != '1':
-                    ignore_game = True
+                if line[0:3] != '1. ':
+                    ignore_game = True  # Ignores games from preset position because they start like '1...'
                 else:
                     temp_game['Raw_Moves'] = line
 
@@ -135,7 +138,7 @@ def retrieve_data(url):
     return pd.DataFrame(all_games)
 
 
-def process_df_cols(player_name, input_df):
+def process_nonmove_cols(input_df, player_name):
     df = input_df.copy()
 
     # drop the rating diff columns. Keeping just for later performance analysis project
@@ -173,7 +176,32 @@ def process_df_cols(player_name, input_df):
     return df
 
 
+def process_moves(input_df, num_moves):
+    df = input_df.copy()
+    # First, cutting off final text of result
+    # Removing additional notation (#, +)... actually, not needed to remove
+    # Second, shortening the moves to the # desired(might not need ot actually, if the split function allows a max
+    # number of columns with an auto-fill of None then both cna be done at once
+
+    df['remove_result'] = [x.rsplit(" ", 1)[0] for x in df["Raw_Moves"]]
+    df['append_game_end'] = df['remove_result'].astype(str) + ' Game_End'
+
+    df["replace"] = df["append_game_end"].str.replace(pat='(^| )\d+\. ', repl=' ', regex=True)
+    moves_df = df["replace"].str.split(pat=' ', n=2*num_moves+1, expand=True)
+    moves_df.drop(columns=[0, 2*num_moves+1], inplace=True)
+
+    move_cols = ["ply_" + str(x) for x in moves_df.columns]
+    moves_df.columns = move_cols
+
+    # join the move columns with the other info
+    output_df = moves_df.join(df[["Date", "OpponentElo", "Outcome"]])
+
+    return output_df
+
+
 def main():
+    full_move_cutoff = 15
+
     inputs = {
         "Player": 'E4_is_Better',
         "Player_Color": 'Both',  # White, Black, Both
@@ -192,7 +220,16 @@ def main():
     url = create_url(inputs)
     raw_game_df = retrieve_data(url)
 
-    cleaned_game_df = process_df_cols(player_name=inputs["Player"], input_df=raw_game_df)
+    partial_processed_df = process_nonmove_cols(input_df=raw_game_df, player_name=inputs["Player"])
+    final_df = process_moves(input_df=partial_processed_df, num_moves=full_move_cutoff)
+
+    # customize
+        # aggregates,
+        # color,
+        # hoverinfo
+    move_cols = ["ply_" + str(i) for i in range(1, 31)]
+    fig = px.treemap(final_df, path=move_cols, values='Outcome')
+    fig.show()
 
 
 if __name__ == '__main__':
