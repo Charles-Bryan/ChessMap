@@ -164,13 +164,17 @@ def process_nonmove_cols(input_df, player_name):
     result_values = [1, 1, 0, 0, 0.5]  # win, win, loss, loss, draw
     df['Outcome'] = np.select(result_conditions, result_values)
 
+    # Column of 1s to aggregate into the number of occurences
+    df['Occurrences'] = 1
+
     df.drop(columns=['White', 'Black', 'Result', 'WhiteElo', 'BlackElo'], inplace=True)
 
     # force column types to save a little memory
     df = df.astype({
         'Date': 'datetime64',
         'OpponentElo': 'int16',
-        'Outcome': 'float16'
+        'Outcome': 'float16',
+        'Occurrences': 'int16',
     })
 
     return df
@@ -178,10 +182,7 @@ def process_nonmove_cols(input_df, player_name):
 
 def process_moves(input_df, num_moves):
     df = input_df.copy()
-    # First, cutting off final text of result
-    # Removing additional notation (#, +)... actually, not needed to remove
-    # Second, shortening the moves to the # desired(might not need ot actually, if the split function allows a max
-    # number of columns with an auto-fill of None then both cna be done at once
+    # Update to keep columns dynamically, not hard coded like now....
 
     df['remove_result'] = [x.rsplit(" ", 1)[0] for x in df["Raw_Moves"]]
     df['append_game_end'] = df['remove_result'].astype(str) + ' Game_End'
@@ -194,13 +195,13 @@ def process_moves(input_df, num_moves):
     moves_df.columns = move_cols
 
     # join the move columns with the other info
-    output_df = moves_df.join(df[["Date", "OpponentElo", "Outcome"]])
+    output_df = moves_df.join(df[["Date", "OpponentElo", "Outcome", "Occurrences"]])
 
     return output_df
 
 
 def main():
-    full_move_cutoff = 15
+    full_move_cutoff = 3
 
     inputs = {
         "Player": 'E4_is_Better',
@@ -227,8 +228,8 @@ def main():
         # aggregates,
         # color,
         # hoverinfo
-    move_cols = ["ply_" + str(i) for i in range(1, 31)]
-    fig = px.treemap(final_df, path=move_cols, values='Outcome')
+    move_cols = ["ply_" + str(i) for i in range(1, full_move_cutoff*2+1)]
+    fig = px.treemap(final_df, path=move_cols, values='Outcome', custom_data=['Date'])
     fig.show()
 
 
