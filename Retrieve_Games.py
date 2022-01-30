@@ -14,8 +14,10 @@ import datetime as dt
 import time
 
 import warnings
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import plotly.express as px
+
 
 def create_url(inputs):
     # default parts
@@ -89,7 +91,8 @@ def retrieve_data(url):
     """
     default_game = {'Raw_Moves': None}
     white_list = ['White', 'Black', 'Date', 'Result', 'WhiteElo', 'BlackElo', 'WhiteRatingDiff', 'BlackRatingDiff']
-    black_list = ['Event', 'Site', 'UTCDate', 'UTCTime', 'Variant', 'TimeControl', 'ECO', 'Termination', 'FEN', 'SetUp']
+    black_list = ['BlackTitle', 'WhiteTitle', 'Event', 'Site', 'UTCDate', 'UTCTime', 'Variant', 'TimeControl',
+                  'ECO', 'Termination', 'FEN', 'SetUp']
     for e in white_list:
         default_game[e] = None
 
@@ -120,9 +123,12 @@ def retrieve_data(url):
                         ignore_game = True
                 else:
                     print(f"debug: Unexpected tag {line[1:space_loc]}")
-            elif line[0].isdigit():
+            elif str(line[0]) == '1':
                 if line[0:3] != '1. ':
                     ignore_game = True  # Ignores games from preset position because they start like '1...'
+                elif '?' in temp_game.values():
+                    # Has caught ? being in the Elo columns when playing bots
+                    ignore_game = True
                 else:
                     temp_game['Raw_Moves'] = line
 
@@ -132,7 +138,13 @@ def retrieve_data(url):
                 else:
                     all_games.append(temp_game)
                     temp_game = default_game.copy()
+            elif str(line[0:3]) == '0-1':
+                # Case of abandoned game where the outcome is 0-1
+                temp_game = default_game.copy()
+                ignore_game = False
+
             else:
+                # Have had the program crash
                 print(f"Unexpected line: {line}")
 
     return pd.DataFrame(all_games)
@@ -146,9 +158,6 @@ def process_nonmove_cols(input_df, player_name):
 
     # Only starting with the following columns:
     #   White, Black, Result, Raw_Moves, Date, WhiteElo, BlackElo
-
-    # Save player color for later?
-    # df['Player_Color'] = np.where(df['White'] == player_name, 'White', 'Black')
 
     # opponent_elo
     df['OpponentElo'] = np.where(df['White'] == player_name, df['BlackElo'], df['WhiteElo'])
@@ -164,9 +173,6 @@ def process_nonmove_cols(input_df, player_name):
     result_values = [1, 1, 0, 0, 0.5]  # win, win, loss, loss, draw
     df['Outcome'] = np.select(result_conditions, result_values)
 
-    # Column of 1s to aggregate into the number of occurences
-    df['Occurrences'] = 1
-
     df.drop(columns=['White', 'Black', 'Result', 'WhiteElo', 'BlackElo'], inplace=True)
 
     # force column types to save a little memory
@@ -174,67 +180,165 @@ def process_nonmove_cols(input_df, player_name):
         'Date': 'datetime64',
         'OpponentElo': 'int16',
         'Outcome': 'float16',
-        'Occurrences': 'int16',
     })
+    df['Date'] = df['Date'].dt.date
 
     return df
 
 
 def process_moves(input_df, num_moves):
     df = input_df.copy()
-    # Update to keep columns dynamically, not hard coded like now....
 
     df['remove_result'] = [x.rsplit(" ", 1)[0] for x in df["Raw_Moves"]]
     df['append_game_end'] = df['remove_result'].astype(str) + ' Game_End'
 
+    # This regex captures space-digit(s)-decimal, or start of string-digit(s)-decimal in the case of '1.'
     df["replace"] = df["append_game_end"].str.replace(pat='(^| )\d+\. ', repl=' ', regex=True)
-    moves_df = df["replace"].str.split(pat=' ', n=2*num_moves+1, expand=True)
-    moves_df.drop(columns=[0, 2*num_moves+1], inplace=True)
 
+    # This splits the move column into separate ply columns
+    moves_df = df["replace"].str.split(pat=' ', n=2 * num_moves + 1, expand=True)
+
+    # First column is just a space. Drop it.
+    moves_df.drop(columns=[0, 2 * num_moves + 1], inplace=True)
+
+    # Name the columns based on their ply
     move_cols = ["ply_" + str(x) for x in moves_df.columns]
     moves_df.columns = move_cols
 
-    # join the move columns with the other info
-    output_df = moves_df.join(df[["Date", "OpponentElo", "Outcome", "Occurrences"]])
+    # join the move columns with the other provided info
+    output_df = moves_df.join(input_df.drop(columns=["Raw_Moves"]))
 
     return output_df
 
 
+def prep_for_plotly(input_df, path):
+    df = input_df.copy()
+
+    # Column of 1s to aggregate into the number of occurrences
+    df['Count'] = 1
+    # add columns for # of wins, # of losses, # of draws.
+    df["Wins"] = 0
+    df.loc[df["Outcome"] == 1.0, 'Wins'] = 1
+    df["Losses"] = 0
+    df.loc[df["Outcome"] == 0.0, 'Losses'] = 1
+    df["Draws"] = 0
+    df.loc[df["Outcome"] == 0.5, 'Draws'] = 1
+
+    df_agg = df.groupby(path).agg(Avg_Result=('Outcome', 'mean'),
+                                  Occurrences=('Count', 'sum'),
+                                  Wins=('Wins', 'sum'),
+                                  Losses=('Losses', 'sum'),
+                                  Draws=('Draws', 'sum'),
+                                  Last_Date=('Date', 'max')
+                                  ).reset_index()
+
+    return df_agg
+
+
+def create_customdata(df, fig, path):
+    # Create the custom data to add to our figure, this gives actually useful hovertext despite plotly's best attempts
+
+    # 1. Get the ids and make a Series of them with an index
+    id_df = pd.DataFrame(data=fig.data[0].ids, columns=['ids'])
+
+    agg_list = []
+    for i in range(len(path)):
+        agg_path = path[:len(path) - i]
+        temp_agg = df.groupby(agg_path).agg(
+            Avg_Result=('Avg_Result', 'mean'),
+            Occurrences=('Occurrences', 'sum'),
+            Wins=('Wins', 'sum'),
+            Losses=('Losses', 'sum'),
+            Draws=('Draws', 'sum'),
+            Last_Date=('Last_Date', 'max')
+        ).reset_index()
+
+        # Join our path in the format plotly did to match their ids
+        temp_agg['ids'] = temp_agg[agg_path].apply("/".join, axis=1).values
+
+        # Drop the path columns only keeping the aggregated columns.
+        temp_agg.drop(columns=agg_path, inplace=True)
+        agg_list.append(temp_agg)
+
+    agg_data = pd.concat(agg_list)
+
+    # Join our custom data against the id's to make sure we passing the right data
+    custom_join = id_df.merge(agg_data[['ids', 'Avg_Result', 'Occurrences', 'Wins', 'Losses', 'Draws', 'Last_Date']],
+                              how='left', on='ids')
+
+    if custom_join.isnull().values.any():
+        print(f"{custom_join.isnull().values.sum()} nan's detected when generating customdata. ")
+
+    # Format Columns how I want their values displayed
+    #   Avg_Result - round and then convert to a string for precision. pands' round function is broken
+    custom_join['Avg_Result'] = custom_join['Avg_Result'].astype(float).round(2).astype(str).str.slice(0, 5)
+
+    # Not sure if I will need the ids for anything later. If I do I can skip the drop
+    return custom_join.drop(columns=['ids'])
+
+
 def main():
     full_move_cutoff = 3
+    path = ["ply_" + str(x) for x in range(1, 2 * full_move_cutoff + 1)]
 
+    # Input data from user
     inputs = {
-        "Player": 'E4_is_Better',
-        "Player_Color": 'Both',  # White, Black, Both
+        "Player": 'thekkid',
+        "Player_Color": 'White',  # White, Black, Both
         "Opponent": 'All',  # Username, All
         "UltraBullet": True,  # True, False
-        "Bullet": False,  # True, False
+        "Bullet": True,  # True, False
         "Blitz": True,  # True, False
         "Rapid": True,  # True, False
-        "Classical": False,  # True, False
-        "Correspondence": False,  # True, False
+        "Classical": True,  # True, False
+        "Correspondence": True,  # True, False
         "Mode": 'Both',  # Rated, Casual, Both
         "Start_Date": dt.datetime(2010, 1, 22, 0, 0),  # None, datetime object from plotly
         "End_Date": 'None',  # None, datetime object from plotly
         "Site": 'Lichess'  # Lichess. Maybe expand to Chess.com one day
     }
+
+    # Get the raw game data
     url = create_url(inputs)
     raw_game_df = retrieve_data(url)
 
+    # Process the data for features I am interested in
     partial_processed_df = process_nonmove_cols(input_df=raw_game_df, player_name=inputs["Player"])
-    final_df = process_moves(input_df=partial_processed_df, num_moves=full_move_cutoff)
+    processed_df = process_moves(input_df=partial_processed_df, num_moves=full_move_cutoff)
 
-    # customize
-        # aggregates,
-        # color,
-        # hoverinfo
-    move_cols = ["ply_" + str(i) for i in range(1, full_move_cutoff*2+1)]
-    fig = px.treemap(final_df, path=move_cols, values='Outcome', custom_data=['Date'])
+    # Further process the data to work with plotly
+    final_df = prep_for_plotly(processed_df, path)
+
+    fig = px.treemap(final_df,
+                     path=path,
+                     values='Occurrences',
+                     color='Avg_Result',
+                     color_continuous_scale=["black", "white", "blue"],
+                     color_continuous_midpoint=0.5,
+                     branchvalues='total')
+
+    # Add in our customdata
+    customdata = create_customdata(final_df, fig, path)
+    # customdata[0] = Avg_Result
+    # customdata[1] = Occurrences
+    # customdata[2] = Wins
+    # customdata[3] = Losses
+    # customdata[4] = Draws
+    # customdata[5] = Last_Date
+    fig.data[0].customdata = customdata
+    # Modify the Hover Template to use our Custom Data
+    fig.data[0].hovertemplate = 'Move: %{label}<br>' \
+                                'Occurrences: %{value}<br>' \
+                                'Average Result: %{customdata[0]}<br>' \
+                                '<br>' \
+                                'Wins:   %{customdata[2]}<br>' \
+                                'Losses: %{customdata[3]}<br>' \
+                                'Draws:  %{customdata[4]}<br>' \
+                                '<br>' \
+                                'Last Played: %{customdata[5]}'
+
     fig.show()
 
 
 if __name__ == '__main__':
     cProfile.run('main()')
-
-
-
