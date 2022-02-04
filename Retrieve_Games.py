@@ -238,7 +238,7 @@ def prep_for_plotly(input_df, path):
 def create_customdata(df, fig, path):
     # Create the custom data to add to our figure, this gives actually useful hovertext despite plotly's best attempts
 
-    # 1. Get the ids and make a Series of them with an index
+    # Get the ids form the figure
     id_df = pd.DataFrame(data=fig.data[0].ids, columns=['ids'])
 
     agg_list = []
@@ -262,7 +262,7 @@ def create_customdata(df, fig, path):
 
     agg_data = pd.concat(agg_list)
 
-    # Join our custom data against the id's to make sure we passing the right data
+    # Join our custom data against the id's to make sure we are passing the right data
     custom_join = id_df.merge(agg_data[['ids', 'Avg_Result', 'Occurrences', 'Wins', 'Losses', 'Draws', 'Last_Date']],
                               how='left', on='ids')
 
@@ -279,23 +279,23 @@ def create_customdata(df, fig, path):
 
 def main():
     full_move_cutoff = 3
-    path = ["ply_" + str(x) for x in range(1, 2 * full_move_cutoff + 1)]
+    path = ["ply_" + str(x) for x in range(0, 2 * full_move_cutoff + 1)]
 
     # Input data from user
     inputs = {
         "Player": 'thekkid',
-        "Player_Color": 'White',  # White, Black, Both
-        "Opponent": 'All',  # Username, All
-        "UltraBullet": True,  # True, False
-        "Bullet": True,  # True, False
-        "Blitz": True,  # True, False
-        "Rapid": True,  # True, False
-        "Classical": True,  # True, False
-        "Correspondence": True,  # True, False
-        "Mode": 'Both',  # Rated, Casual, Both
+        "Player_Color": 'White',    # White, Black, Both
+        "Opponent": 'All',          # Username, All
+        "UltraBullet": True,        # True, False
+        "Bullet": True,             # True, False
+        "Blitz": True,              # True, False
+        "Rapid": True,              # True, False
+        "Classical": True,          # True, False
+        "Correspondence": True,     # True, False
+        "Mode": 'Both',             # Rated, Casual, Both
         "Start_Date": dt.datetime(2010, 1, 22, 0, 0),  # None, datetime object from plotly
-        "End_Date": 'None',  # None, datetime object from plotly
-        "Site": 'Lichess'  # Lichess. Maybe expand to Chess.com one day
+        "End_Date": 'None',         # None, datetime object from plotly
+        "Site": 'Lichess'           # Lichess. Maybe expand to Chess.com one day
     }
 
     # Get the raw game data
@@ -305,6 +305,7 @@ def main():
     # Process the data for features I am interested in
     partial_processed_df = process_nonmove_cols(input_df=raw_game_df, player_name=inputs["Player"])
     processed_df = process_moves(input_df=partial_processed_df, num_moves=full_move_cutoff)
+    processed_df['ply_0'] = 'All Games'
 
     # Further process the data to work with plotly
     final_df = prep_for_plotly(processed_df, path)
