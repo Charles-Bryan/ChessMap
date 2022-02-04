@@ -261,25 +261,38 @@ def create_customdata(df, fig, path):
         agg_list.append(temp_agg)
 
     agg_data = pd.concat(agg_list)
+    # Add a parent id to see hw frequent a move is out of the parent move
+    agg_data['parent_id'] = agg_data['ids'].str.rsplit('/', n=1, expand=True)[0]
 
     # Join our custom data against the id's to make sure we are passing the right data
-    custom_join = id_df.merge(agg_data[['ids', 'Avg_Result', 'Occurrences', 'Wins', 'Losses', 'Draws', 'Last_Date']],
-                              how='left', on='ids')
+    custom_join = id_df.merge(agg_data[['ids', 'Avg_Result', 'Occurrences', 'Wins', 'Losses', 'Draws', 'Last_Date',
+                                        'parent_id']], how='left', on='ids')
+
+    custom_join = custom_join.merge(agg_data[['Occurrences', 'ids']],
+                              how='left', on=None, left_on='parent_id', right_on='ids', suffixes=('', '_parent'))
 
     if custom_join.isnull().values.any():
         print(f"{custom_join.isnull().values.sum()} nan's detected when generating customdata. ")
 
+    # Create any columns I need from the data
+    # 1. Percentage of parent
+    custom_join['percent_of_parent'] = 100*custom_join['Occurrences']/custom_join['Occurrences_parent']
+    # 2. Percentage of total(use max value of the Occurrences column)
+    total_games = custom_join['Occurrences'].max()
+    custom_join['percent_of_total'] = 100*custom_join['Occurrences']/total_games
+
     # Format Columns how I want their values displayed
     #   Avg_Result - round and then convert to a string for precision. pands' round function is broken
     custom_join['Avg_Result'] = custom_join['Avg_Result'].astype(float).round(2).astype(str).str.slice(0, 5)
-
+    custom_join['percent_of_total'] = custom_join['percent_of_total'].astype(float).round(2).astype(str).str.slice(0, 5)
+    custom_join['percent_of_parent'] = custom_join['percent_of_parent'].astype(float).round(2).astype(str).str.slice(0, 5)
     # Not sure if I will need the ids for anything later. If I do I can skip the drop
-    return custom_join.drop(columns=['ids'])
+    return custom_join.drop(columns=['ids', 'parent_id', 'ids_parent'])
 
 
 def main():
     full_move_cutoff = 3
-    path = ["ply_" + str(x) for x in range(0, 2 * full_move_cutoff + 1)]
+
 
     # Input data from user
     inputs = {
@@ -305,8 +318,9 @@ def main():
     # Process the data for features I am interested in
     partial_processed_df = process_nonmove_cols(input_df=raw_game_df, player_name=inputs["Player"])
     processed_df = process_moves(input_df=partial_processed_df, num_moves=full_move_cutoff)
-    processed_df['ply_0'] = 'All Games'
 
+    processed_df['ply_0'] = 'All Games'
+    path = ["ply_" + str(x) for x in range(0, 2 * full_move_cutoff + 1)]
     # Further process the data to work with plotly
     final_df = prep_for_plotly(processed_df, path)
 
@@ -326,11 +340,16 @@ def main():
     # customdata[3] = Losses
     # customdata[4] = Draws
     # customdata[5] = Last_Date
+    # customdata[6] = Occurrences_parent
+    # customdata[7] = percent_of_parent
+    # customdata[8] = percent_of_total
     fig.data[0].customdata = customdata
     # Modify the Hover Template to use our Custom Data
     fig.data[0].hovertemplate = 'Move: %{label}<br>' \
                                 'Occurrences: %{value}<br>' \
                                 'Average Result: %{customdata[0]}<br>' \
+                                'Percentage of Parent: %{customdata[7]}<br>'\
+                                'Percentage of Total Games: %{customdata[8]}<br>'\
                                 '<br>' \
                                 'Wins:   %{customdata[2]}<br>' \
                                 'Losses: %{customdata[3]}<br>' \
